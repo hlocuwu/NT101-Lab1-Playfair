@@ -1,91 +1,122 @@
-def create_playfair_square(key):
-    key = key.upper().replace("J", "I")
-    key = "".join(dict.fromkeys(key))
-    
-    alphabet = "ABCDEFGHIKLMNOPQRSTUVWXYZ"
-    square = []
-    for char in key + alphabet:
-        if char not in square:
-            square.append(char)
-    
-    return [square[i:i+5] for i in range(0, 25, 5)]
+import numpy as np
+import random
+import math
 
-def prepare_text(text):
+def get_key_matrix(key, n):
+    """Chuyển chuỗi key thành ma trận khóa n x n"""
+    key = key.upper()
+    key_numbers = [ord(char) - ord('A') + 1 if char != 'Z' else 0 for char in key]  # A=1, B=2, ..., Z=00
+
+    # Nếu key chưa đủ, bổ sung bằng 'X' (X = 24)
+    while len(key_numbers) < n * n:
+        key_numbers.append(ord('X') - ord('A') + 1)
+
+    key_matrix = np.array(key_numbers).reshape(n, n)
+    return key_matrix
+
+def generate_random_key(n):
+    """Tạo key ngẫu nhiên với kích thước n x n, đảm bảo định thức nguyên tố cùng nhau với 26"""
+    while True:
+        # Tạo key ngẫu nhiên
+        key = ''.join(random.choice('ABCDEFGHIJKLMNOPQRSTUVWXYZ') for _ in range(n * n))
+        key_matrix = get_key_matrix(key, n)
+
+        # Tính định thức
+        det = int(round(np.linalg.det(key_matrix)))
+        det = det % 26  # Lấy định thức modulo 26
+
+        # Kiểm tra xem định thức có nguyên tố cùng nhau với 26 không
+        if math.gcd(det, 26) == 1:
+            return key
+
+def mod_inverse_matrix(matrix, mod):
+    """Tính ma trận nghịch đảo theo modulo"""
+    det = int(round(np.linalg.det(matrix)))  # Tính định thức
+    det_inv = pow(det, -1, mod)  # Tính nghịch đảo của định thức modulo mod
+
+    adjugate = np.linalg.inv(matrix) * det
+    adjugate = np.round(adjugate).astype(int)  # Làm tròn và chuyển thành số nguyên
+    inverse_matrix = (det_inv * adjugate) % mod  # Ma trận nghịch đảo
+
+    return inverse_matrix
+
+def text_to_numbers(text):
+    """Chuyển đổi văn bản thành số (A=1, ..., Y=25, Z=00)"""
+    return [ord(char) - ord('A') + 1 if char != 'Z' else 0 for char in text]
+
+def numbers_to_text(numbers):
+    """Chuyển đổi số thành văn bản (1=A, ..., 25=Y, 00=Z)"""
+    return ''.join(chr(num + ord('A') - 1) if num != 0 else 'Z' for num in numbers)
+
+def prepare_text(text, size):
+    """Chuẩn bị văn bản: viết hoa, loại bỏ khoảng trắng, thêm ký tự nếu thiếu"""
     text = text.upper().replace(" ", "")
-    text = text.replace("J", "I")
-    digraphs = []
-    for i in range(0, len(text), 2):
-        digraph = text[i:i+2]
-        if len(digraph) == 1:
-            digraph += "X"
-        elif digraph[0] == digraph[1]:
-            digraph = digraph[0] + "X" + digraph[1]
-        digraphs.append(digraph)
-    return digraphs
+    while len(text) % size != 0:
+        text += 'X'  # Thêm 'X' nếu thiếu (X = 24)
+    return text
 
-def find_position(square, char):
-    for row in range(5):
-        for col in range(5):
-            if square[row][col] == char:
-                return row, col
-    return None
+def hill_encrypt(plaintext, key_matrix):
+    """Mã hóa văn bản bằng Hill Cipher"""
+    n = len(key_matrix)
+    plaintext = prepare_text(plaintext, n)
+    numbers = text_to_numbers(plaintext)
 
-def encrypt_digraph(square, digraph):
-    a, b = digraph[0], digraph[1]
-    row_a, col_a = find_position(square, a)
-    row_b, col_b = find_position(square, b)
-    
-    if row_a == row_b:
-        return square[row_a][(col_a + 1) % 5] + square[row_b][(col_b + 1) % 5]
-    elif col_a == col_b:
-        return square[(row_a + 1) % 5][col_a] + square[(row_b + 1) % 5][col_b]
-    else:
-        return square[row_a][col_b] + square[row_b][col_a]
+    ciphertext_numbers = []
+    for i in range(0, len(numbers), n):
+        block = np.array(numbers[i:i+n])
+        encrypted_block = np.dot(key_matrix, block) % 26  # Mã hóa từng block
+        ciphertext_numbers.extend(encrypted_block)
 
-def decrypt_digraph(square, digraph):
-    a, b = digraph[0], digraph[1]
-    row_a, col_a = find_position(square, a)
-    row_b, col_b = find_position(square, b)
-    
-    if row_a == row_b:
-        return square[row_a][(col_a - 1) % 5] + square[row_b][(col_b - 1) % 5]
-    elif col_a == col_b:
-        return square[(row_a - 1) % 5][col_a] + square[(row_b - 1) % 5][col_b]
-    else:
-        return square[row_a][col_b] + square[row_b][col_a]
+    return numbers_to_text(ciphertext_numbers)
 
-def playfair_encrypt(plaintext, key):
-    square = create_playfair_square(key)
-    digraphs = prepare_text(plaintext)
-    ciphertext = ""
-    for digraph in digraphs:
-        ciphertext += encrypt_digraph(square, digraph)
-    return ciphertext
+def hill_decrypt(ciphertext, key_matrix):
+    """Giải mã văn bản bằng Hill Cipher"""
+    n = len(key_matrix)
+    key_inverse = mod_inverse_matrix(key_matrix, 26)
+    numbers = text_to_numbers(ciphertext)
 
-def playfair_decrypt(ciphertext, key):
-    square = create_playfair_square(key)
-    digraphs = prepare_text(ciphertext)
-    plaintext = ""
-    for digraph in digraphs:
-        plaintext += decrypt_digraph(square, digraph)
-    return plaintext
+    plaintext_numbers = []
+    for i in range(0, len(numbers), n):
+        block = np.array(numbers[i:i+n])
+        decrypted_block = np.dot(key_inverse, block) % 26  # Giải mã từng block
+        plaintext_numbers.extend(decrypted_block)
+
+    return numbers_to_text(plaintext_numbers)
 
 if __name__ == "__main__":
-    key = input("Enter the key: ").strip()
+    n = int(input("Nhập kích thước ma trận khóa (n x n): "))
     
-    print("Choose an option:")
-    print("1. Encrypt")
-    print("2. Decrypt")
-    choice = input("Enter your choice (1 or 2): ").strip()
-    
+    # Tạo key ngẫu nhiên nếu người dùng không nhập key
+    key = input("Nhập khóa (chuỗi ký tự, để trống để tạo ngẫu nhiên): ").strip()
+    if not key:
+        key = generate_random_key(n)
+        print(f"Key ngẫu nhiên được tạo: {key}")
+
+    key_matrix = get_key_matrix(key, n)
+    print(f"Ma trận khóa {n}x{n}:")
+    print(key_matrix)
+
+    # Kiểm tra định thức của ma trận khóa
+    det = int(round(np.linalg.det(key_matrix)))
+    det = det % 26
+    print(f"Định thức của ma trận khóa (mod 26): {det}")
+    if math.gcd(det, 26) != 1:
+        print("Lỗi: Ma trận khóa không có nghịch đảo modulo 26. Vui lòng thử lại.")
+        exit()
+
+    print("\nChọn thao tác:")
+    print("1. Mã hóa")
+    print("2. Giải mã")
+    choice = input("Nhập lựa chọn (1 hoặc 2): ").strip()
+
     if choice == "1":
-        plaintext = input("Enter the plaintext: ").strip()
-        ciphertext = playfair_encrypt(plaintext, key)
-        print(f"Ciphertext: {ciphertext}")
-        
+        plaintext = input("Nhập văn bản cần mã hóa: ").strip()
+        ciphertext = hill_encrypt(plaintext, key_matrix)
+        print(f"Văn bản đã mã hóa: {ciphertext}")
+
     elif choice == "2":
-        ciphertext = input("Enter the ciphertext: ").strip()
-        plaintext = playfair_decrypt(ciphertext, key)
-        print(f"Decrypted Text: {plaintext}")
+        ciphertext = input("Nhập văn bản cần giải mã: ").strip()
+        plaintext = hill_decrypt(ciphertext, key_matrix)
+        print(f"Văn bản đã giải mã: {plaintext}")
     else:
-        print("Invalid choice. Please choose 1 or 2.")
+        print("Lựa chọn không hợp lệ. Vui lòng nhập 1 hoặc 2.")
